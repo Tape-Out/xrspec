@@ -933,6 +933,31 @@ diagnostics:
 - 导入文件里有不认识的键：`XR-CFG-002`，warn；`olddefconfig` 丢掉它并列出。
 - 把 `savedefconfig` 出的文件里一个值改回默认值，再存一次，那一行必须消失。
 
+## 九之三、`dt` —— 在设备树里怎么露面
+
+`ran export -f dts` 从解出的装配出设备树源，`-f svd` 出 CMSIS-SVD，`-f h` 出整颗芯片的 C 头。三者读同一张表：每个实例的地址、大小、它的包在设备树里叫什么。包在清单里写 `dt:` 说后一件：
+
+```yaml
+dt:
+  node: cpu                        # 节点名，按设备树规范的通用名：cpu、memory、serial、gpio……
+  compatible: [riscv]              # 追加在 "tape-out,<包名>" 之后
+  size: { knob: words, scale: 4 }  # 存储报实际装了多少；不写就用装配给的地址窗口
+  props:
+  - { name: riscv,isa-base, value: rv32i }
+  - { name: mmu-type, value: riscv,sv32, when: { mmu: true } }
+  - { name: mmu-type, value: riscv,none, when: { mmu: false } }
+```
+
+- 不写 `dt:` 的包，节点名就是包名，`compatible` 只有 `tape-out,<包名>`。`node: cpu` 的实例进 `cpus`，`node: memory` 的进根节点，其余进 `soc`（`simple-bus`）。
+- `props` 按写的次序出，`when` 不满足的跳过；`value` 缺省是空属性（如 `interrupt-controller`）。
+- **中断本版不导**：今天的中断连线写在 `connect:` 里是 BSV 表达式，从那里猜的中断号不可信，等连线结构化之后再补。
+- SVD 与 C 头只收有寄存器图、且有总线地址的实例；`shape: none` 的包（`rvcore` 的 CSR 空间）不进。
+
+**反例**：
+- `dt` 里写了不认识的键：清单校验报错，列出认得的四个。
+- 存储节点照译码窗口出大小：`soc-mcu` 的 256 字存储会报成 64 KiB，Linux 会去用不存在的内存——`size` 必须给出实际大小。
+- 属性写在子节点之后：dtc 拒收；生成器保证属性在前。
+
 ---
 
 ## 十、本版明确不做
