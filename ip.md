@@ -877,14 +877,14 @@ diagnostics:
 
 `allow` 等于 `info`（照跑，留在报告里），`deny` 等于 `error`，`warn` 居中；也可以像上面那样逐条写级别。
 
-- **放宽由工具翻译成前端的兼容开关**，开了哪些写进回执：`UsedBeforeDeclared` 对应 slang 的 `--allow-use-before-declare`，`SysFuncHierarchicalNotAllowed` 与 `ConstEvalHierarchicalName` 对应 `--allow-hierarchical-const`。对应表是数据，新加一条不改结构。
+- **放宽由工具翻译成前端的兼容开关**，开了哪些写进回执：`UsedBeforeDeclared` 对应 slang 的 `--allow-use-before-declare`，`SysFuncHierarchicalNotAllowed` 与 `ConstEvalHierarchicalName` 对应 `--allow-hierarchical-const`，`UnknownModule` 对应 `--ignore-unknown-modules`（厂商原语如 Xilinx 的 `xpm_*` 没有源码，当黑盒只核顶层）。对应表是数据，新加一条不改结构。
 - **开关作用于这个包的整次展开**，放不到其中几个文件上。回执本来就一个包一个包地展开，所以放宽不会漏到别的包。
 - **后果由声明的人承担。本组织自己的包默认最严**：除特殊情况并写明理由外，不放宽。
 - **前端没有开关的诊断放不宽**：写了报 `XR-DIAG-001`。「声明放宽了、实际仍然报错」比不声明更让人糊涂。
 
 **反例**：
 - 没打补丁的 Vortex 不写 `allow`：报 `slang:UsedBeforeDeclared` 并指到源文件的行。写了 `allow`：照跑，回执里列出 `--allow-use-before-declare`。
-- `allow: [slang:UnknownModule]`：slang 没有让它放过未定义模块的开关，报 `XR-DIAG-001`。
+- `allow: [slang:UndeclaredIdentifier]`：slang 没有放过未声明标识符的开关，报 `XR-DIAG-001`。
 
 ### 不许把「没量」说成「过了」
 
