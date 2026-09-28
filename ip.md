@@ -1,4 +1,4 @@
-# `ip.yaml` 规范 v0.2.5
+# `ip.yaml` 规范 v0.2.6
 
 一个包一份 `ip.yaml`。它同时承担两件事：**描述这个包**（契约、旋钮、依赖、面积），以及在带 `instances:` 时**描述一次装配**。叶子 IP 与整颗 SoC 用的是同一份 schema，只差有没有 `instances:` 段。
 
@@ -597,14 +597,54 @@ receipt:
 - 用错了生成器的求值方式，存储口数成了 0：`XR-RCPT-001` 必须报；写了 `ge: 1` 的探针同时报 `XR-RCPT-002`。
 - 上游把 `VX_MEM_PORTS` 改了名：`XR-RCPT-003`，error，「探针找不到符号」。探针失效时要明确报错，不许当成通过。
 
+#### 编译单元
+
+IEEE 1800 把「几个文件组成几个编译单元」留给工具定：iverilog 把全部文件并成一个，slang 默认一个文件一个。上游若把声明写在 `$unit` 层（文件里、模块外的 `parameter`），别的文件直接引用，就只在并成一个单元时编得过：
+
+```yaml
+- kind: foreign
+  top: gpu_die
+  unit: single                 # file（默认）| single
+  rtl: [src/const.sv, src/core.sv, src/gpu_die.sv]
+```
+
+- `single` 时文件顺序有意义，`$unit` 层的声明要排在用它的文件前面。
+- 这是语言语义的选择，不是诊断，所以不走 `diagnostics`。
+
+**反例**：VeriGPU 不写 `unit: single`，回执报 `slang:UndeclaredIdentifier`，指到用 `data_width` 的那一行；写了就过。写 `unit: many`，清单校验报错并列出两个合法值。
+
+#### 上游自己的测试
+
+`test.upstream` 列上游自带的测试，矩阵的每一点都跑。两种写法：
+
+```yaml
+test:
+  upstream:
+    # 测试台：息壤用 iverilog 编译运行，参数按这一点的旋钮覆盖
+    - { name: hello, files: [bench/tb.v, rtl/core.v], dut: tb,
+        params: { width: w }, fixed: { memsize: 8192 },
+        expect: "Hi", timeout: 120, when: { w: 1 } }
+    # 任务：上游有自己的脚本（先汇编再仿真、cocotb、Makefile），退出码就是判据
+    - { name: examples, task: examples, timeout: 600 }
+```
+
+- 测试台那一种，`name`、`files`、`dut` 必写；`expect` 给了就要在输出里找到它，只看「仿真结束了」不算过。
+- 任务那一种只认 `name`、`task`、`timeout`、`when`，`task` 必须是 `tasks:` 里的一条。任务按这一点解出的配置填占位符。
+- `when` 不满足的点跳过，并在报告里写明跳过的原因，不算通过。
+
+**反例**：
+- 任务那一种再写 `dut`：清单校验报错，两种写法不混。
+- `task` 指向 `tasks:` 里没有的名字：清单校验报错。
+- 任务退出码非零：这一点标红，报告里带退出码与输出末尾几行（`XR-TASK-004`）。
+
 #### 本版实现到哪
 
 规范一次写全，工具分档实现。**用到还没实现的写法，报 `XR-SPEC-001`「已声明，本版还不能构建」**，不报语法错：
 
 | 写法 | 状态 |
-|:--|:--:|
-| 单个文件、带 `when` 的文件、`sim` 列表 · `defines` 的列表、值宏、开关宏 · `includes` · `setup` · 顶层端口与参数的回执 | 已实现 |
-| glob · 正则 · Flist 与 `--flist` · `views` · 选择宏 · 逐档映射 · `XR-RCPT-001` · 探针 · `slang:` 诊断与 `allow`／`deny` · 配置导入与补全 | 已声明，未实现 |
+|:--:|:--:|
+| 单个文件、带 `when` 的文件、glob、正则、Flist 与 `--flist` · `sim` 列表与 `views` · `defines` 的五种写法 · `includes` · `setup` · `unit` · 回执（端口、参数、`XR-RCPT-001`、探针） · `slang:` 诊断与 `allow`／`deny` · `test.upstream` 的两种写法 | 已实现 |
+| 文件按 slang 算出的依赖排序并记进锁 · 配置导入与补全 | 已声明，未实现 |
 
 **扁平化不是免费的**：把综合边界推到契约层，对外线位实测从 475 涨到 762（+60%），多出来的全是方法变端口后的 `RDY`/`EN` 握手线。代价随 `contract.ctrl.shape` 变——`flat` 形态近乎恒等变换，`server` 形态要把两组握手都摊成端口。**这笔钱在配置时就该看得见**，所以它进价目表。
 
@@ -748,6 +788,8 @@ test:
 | 调度门禁 | 会不会卡：`G0004` `G0021` `G0006` `G0035` |
 | 寄存器一致性 | 读写对不对：从 `regmap.yaml` 生成 |
 | 各仓自己的行为测试 | 行为对不对：`htest/mk*.py` |
+| 黑盒的展开与回执 | 这一组参数展不展得开，声明与展开后的设计对不对得上 |
+| 上游自己的测试 | `test.upstream`，见六的「上游自己的测试」 |
 
 `htest/mk*.py` 收两个参数：输出目录，以及这一点的 `{"label": ..., "knobs": {...}}`。**认矩阵的生成脚本照它改包名与期望，不认的照旧生成同一份**——生成物逐字节相同的点不重复跑，于是「这个测试台其实不看配置」在报告里是明写的，而不是悄悄浪费。
 
