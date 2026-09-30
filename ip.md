@@ -1,4 +1,4 @@
-# `ip.yaml` 规范 v0.2.7
+# `ip.yaml` 规范 v0.2.8
 
 一个包一份 `ip.yaml`。它同时承担两件事：**描述这个包**（契约、旋钮、依赖、面积），以及在带 `instances:` 时**描述一次装配**。叶子 IP 与整颗 SoC 用的是同一份 schema，只差有没有 `instances:` 段。
 
@@ -22,6 +22,7 @@ constraints: [ ... ]    # 跨旋钮约束
 guards:     [ ... ]     # 条件取值域
 profiles:   { ... }     # 档位：一组默认值
 chip:       { ... }     # 芯片级旋钮的初值（只有装配能写）
+asic:       { ... }     # 可选。流片交付：顶层契约、payload 位、主频、ecc 预设
 area:       { ... }     # 面积基线与模型
 emit:       [ ... ]     # 交付形态
 deps:       { ... }     # 依赖
@@ -708,6 +709,89 @@ tasks:
 
 **反例**：认不得的名字（`{{nope}}`）与写法不对的（`{{Name}}`、`{{knob.num-cores}}`）都报 `XR-TASK-003`，不原样留在命令里照跑；任务名与内建阶段同名、`needs` 成环，同样报错。
 
+## 六之四、`asic` —— 流片交付
+
+`targets` 说怎么构建，`asic` 说**这一颗怎么交出去**：顶层长什么样、payload 的每一位接谁、跑多快、走 ecc 的哪套流程。只有要流片的包写它，`ran asic <包>` 读它。本版收装配与黑盒，叶子 IP 先套一层装配。
+
+```yaml
+asic:
+  top: to2610_switch        # 交付的模块名与文件名；省略则包名的 - 换成 _
+  frame: mpc                # mpc：MPC-Frame 五口；none：设计的端口原样当芯片端口
+  mhz: 50                   # 目标主频，进 ecc 的 frequency_mhz，由它生成 create_clock
+  flow: rtl2gds             # ecc 预设：syn_sta | rtl2gds | harden | rcx，省略即 syn_sta
+  pads:                     # payload 位从 0 起按序分配
+    - sw0_pins_tx_0_*       # 端口名，可带 *；匹配到的按声明次序依次占位
+    - { in: mdio0_pins_mdio_i, out: mdio0_pins_mdio_o, oe: mdio0_pins_mdio_oe }
+    - { in: i2c0_pins_sda_i, oe: i2c0_pins_sda_pull }     # 开漏：oe 为 1 时拉低
+    - { port: spis0_pins_miso, at: 60 }                   # at 钉起始位
+  tie:                      # 不出芯片的输入接成常量
+    sw0_pins_rx_*_rx_er: 0
+  unused: [irqs]            # 不出芯片的输出，明写
+```
+
+`frame: none` 时不写 `pads`、`tie`、`unused`，时钟端口名写在 `clock`；`frame: mpc` 的时钟固定叫 `clock`，不写 `clock`。
+
+### 五口顶层
+
+`frame: mpc` 时息壤生成这一层，契约照 MPC-Frame 的 `docs/cn/io-map.md`：
+
+```verilog
+module to2610_switch (
+  input  wire        clock,
+  input  wire        reset,      // 高有效
+  input  wire [65:0] io_in,
+  output wire [65:0] io_out,
+  output wire [65:0] io_oe
+);
+```
+
+| 条目 | 每位占 | `io_out[n]` | `io_oe[n]` |
+|:--:|:--:|:--:|:--:|
+| 单向输入 | 一位 | 0 | 0 |
+| 单向输出 | 一位 | 设计的输出 | 1 |
+| 三态组 `{in, out, oe}` | 一位 | `out` | `oe` |
+| 开漏 `{in, oe}` | 一位 | 0 | `oe` |
+| 没分配的位 | — | 0 | 0 |
+
+三态组里写了的几个端口位宽必须相同。设计的时钟与复位不进 `pads`：`clock` 直接接，`reset` 按设计的复位极性接——装配出的顶层是低有效的 `rst_n`，黑盒照 `emit` 里的 `reset.active`。**端口怎么排只看这里，不按名字猜**：gpio 叫 `gpio_dir`、spi 叫 `io_oe`、i2c 是开漏的 `scl_pull`，猜不齐。
+
+### 展平
+
+交付的是**一个 `.v`**：bsc 出的模块、bsc 的库模块、黑盒展开后的模块、五口顶层全在一个文件里。参数按解出的配置展开，层次保留；除顶层外的模块名一律加 `<top>_` 前缀，参数化出来的变体按原名排序编号——同一片 MPC 上的几颗设计都带着 bsc 的 `FIFO2`，不改名就撞。bsc 的 `initial` 块按 `BSV_NO_INITIAL_BLOCKS` 去掉，流片的触发器没有初值。
+
+写完要自检：只有顶层不带前缀，yosys 只读这一个文件按顶层展开不缺模块。
+
+### 连线闭合
+
+除时钟与复位，设计的每个端口必须落在 `pads`、`tie`、`unused` 三处之一，且只落一处。**漏了就报错，不自动接地**：悄悄接地的输入在仿真里是一个永远不来的请求，在片上是一个永远不响的口。
+
+### 报告
+
+`ran asic` 写 `report.json`，流片说明从它生成，不手填：
+
+| 节 | 内容 |
+|:--:|:--:|
+| `config` | 每个实例的每个旋钮：取值、赢的那一层、写在哪（与 `config --why` 同源） |
+| `pads` | payload 位表、接成常量的输入、不出芯片的输出 |
+| `sources` | 用到的每个包：版本、仓库、提交号、有没有未提交的改动；黑盒另列上游子模块的地址与提交号 |
+| `toolchain` | bsc、yosys、sv2v、ecc、息壤的版本与 PDK 的位置 |
+| `ecc` | 各步骤的状态与耗时、单元数、面积、最后一个出了时序的步骤的建立与保持裕量、功耗、签核清单 |
+| `gate` | 下表几道检查的结果 |
+
+### 检查号
+
+| 号 | 默认 | 什么时候报 |
+|:--:|:--:|:--|
+| `XR-ASIC-001` | error | 要流片的包没有 `asic` 段 |
+| `XR-ASIC-002` | error | payload 位不够，或两处分到同一位 |
+| `XR-ASIC-003` | error | 有端口哪儿都没落 |
+| `XR-ASIC-004` | error | 端口不存在、方向不对、落了两处、三态组位宽不一或没写 `oe`、常量放不进位宽 |
+| `XR-ASIC-005` | error | 展平、自检或 ecc 没跑通 |
+| `XR-ASIC-006` | error | 建立时间最差裕量为负 |
+| `XR-ASIC-007` | error | 保持时间最差裕量为负 |
+
+前四道在写任何文件之前报。时序那两道按诊断闸门放宽：`diagnostics: { XR-ASIC-006: warn }`，照跑并留在报告里。
+
 ## 七、`deps` —— 依赖
 
 照搬 cargo 的来源模型：
@@ -759,6 +843,8 @@ instances:
 地址重叠在展开期报错，不留到仿真。
 
 **装配包不得含自有 RTL。** 长出自有 RTL 就说明下层缺件，该补的是下层，不是把胶水塞进装配包。
+
+**`bus: none`**：片外没有总线口，片上总线只由片内的发起方驱动。无核的设备（交换机、转换器）靠 `spis` 这类 SPI 从口桥管理。片上一个发起方都没有时报错——地址图上的设备谁也访问不到。
 
 ---
 
