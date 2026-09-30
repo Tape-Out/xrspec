@@ -753,7 +753,7 @@ module to2610_switch (
 | 开漏 `{in, oe}` | 一位 | 0 | `oe` |
 | 没分配的位 | — | 0 | 0 |
 
-三态组里写了的几个端口位宽必须相同。设计的时钟与复位不进 `pads`：`clock` 直接接，`reset` 按设计的复位极性接——装配出的顶层是低有效的 `rst_n`，黑盒照 `emit` 里的 `reset.active`。**端口怎么排只看这里，不按名字猜**：gpio 叫 `gpio_dir`、spi 叫 `io_oe`、i2c 是开漏的 `scl_pull`，猜不齐。
+三态组里写了的几个端口位宽必须相同。设计的时钟与复位不进 `pads`：`clock` 直接接；`reset` 按设计的复位极性接，不再同步——FrameTop 的 `FrameDesignControl` 已按时钟放开复位（两拍 `release_count`），再同步一次是多余的——装配出的顶层是低有效的 `rst_n`，黑盒照 `emit` 里的 `reset.active`。**端口怎么排只看这里，不按名字猜**：gpio 叫 `gpio_dir`、spi 叫 `io_oe`、i2c 是开漏的 `scl_pull`，猜不齐。
 
 ### 展平
 
