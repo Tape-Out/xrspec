@@ -1,4 +1,4 @@
-# `ip.yaml` 规范 v0.2.8
+# `ip.yaml` 规范 v0.2.9
 
 一个包一份 `ip.yaml`。它同时承担两件事：**描述这个包**（契约、旋钮、依赖、面积），以及在带 `instances:` 时**描述一次装配**。叶子 IP 与整颗 SoC 用的是同一份 schema，只差有没有 `instances:` 段。
 
@@ -688,11 +688,13 @@ tasks:
     run: bash htest/smoke.sh
     needs: [spinal]
     env: { CROSS: loongarch64-linux-gnu- }
+    timeout: 5400
     desc: 开缓存跑一段小程序
 ```
 
-- 一条任务写成一行命令，或带 `run` 的表；表里只认 `run`、`needs`、`env`、`cwd`、`desc`。名字以小写字母开头，只含小写字母、数字与短横，不能与内建阶段 `check`、`gen`、`build`、`test` 同名。
+- 一条任务写成一行命令，或带 `run` 的表；表里只认 `run`、`needs`、`env`、`cwd`、`desc`、`timeout`。名字以小写字母开头，只含小写字母、数字与短横，不能与内建阶段 `check`、`gen`、`build`、`test` 同名。
 - `needs:` 只能指向内建阶段或别的任务，成环在检查期报错。
+- `timeout` 是正整数秒，不写是 1800。`test.upstream` 那一条自己写了 `timeout` 时以它为准。超时连同任务起的子进程一起停，不留孤儿。
 - **命令只读已解出的配置，不许回头改它**：只有下表这几种占位符，任务的输出不被解析成配置。
 - 默认不进构建图，`ran build` 不替你跑，要 `ran run <包> <任务>`。工具会调用任务的只有两处：黑盒的 `setup`，与 `test.upstream` 的任务形式。
 
@@ -707,7 +709,7 @@ tasks:
 
 占位符与宏投影、`ran new` 同一套 `{{…}}`，花括号内侧可以留空格。
 
-**反例**：认不得的名字（`{{nope}}`）与写法不对的（`{{Name}}`、`{{knob.num-cores}}`）都报 `XR-TASK-003`，不原样留在命令里照跑；任务名与内建阶段同名、`needs` 成环，同样报错。
+**反例**：认不得的名字（`{{nope}}`）与写法不对的（`{{Name}}`、`{{knob.num-cores}}`）都报 `XR-TASK-003`，不原样留在命令里照跑；任务名与内建阶段同名、`needs` 成环、`timeout` 不是正整数，同样报错。
 
 ## 六之四、`asic` —— 流片交付
 
