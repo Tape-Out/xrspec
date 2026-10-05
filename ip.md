@@ -722,7 +722,7 @@ asic:
   top: to2610_switch        # 交付的模块名与文件名；省略则包名的 - 换成 _
   frame: mpc                # mpc：MPC-Frame 五口；none：设计的端口原样当芯片端口
   mhz: 50                   # 目标主频，进 ecc 的 frequency_mhz，由它生成 create_clock
-  flow: rtl2gds             # ecc 预设：syn_sta | rtl2gds | harden | rcx，省略即 syn_sta
+  flow: rtl2gds             # syn_sta 只到综合后时序；rtl2gds 是 ecc 的全流程，走到 Harden。省略即 syn_sta
   pads:                     # payload 位从 0 起按序分配
     - sw0_pins_tx_0_*       # 端口名，可带 *；匹配到的按声明次序依次占位
     - { in: mdio0_pins_mdio_i, out: mdio0_pins_mdio_o, oe: mdio0_pins_mdio_oe }
@@ -732,6 +732,8 @@ asic:
     sw0_pins_rx_*_rx_er: 0
   unused: [irqs]            # 不出芯片的输出，明写
 ```
+
+`flow` 还认 `harden` 与 `rcx`：那是 ecc alpha.12 之前给全流程与「布线后加寄生与时序」起的预设名，现在都照 `rtl2gds` 跑。
 
 `frame: none` 时不写 `pads`、`tie`、`unused`，时钟端口名写在 `clock`；`frame: mpc` 的时钟固定叫 `clock`，不写 `clock`。
 
